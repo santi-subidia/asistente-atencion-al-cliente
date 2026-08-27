@@ -2,7 +2,12 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+1. Copia el archivo `.env.example` a `.env.local` e introduce tus claves de Supabase y Google Gemini:
+   ```bash
+   cp .env.example .env.local
+   ```
+
+2. Ejecuta el servidor de desarrollo:
 
 ```bash
 npm run dev

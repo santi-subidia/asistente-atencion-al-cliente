@@ -1,13 +1,18 @@
+-- ==========================================
+-- CONFIGURACIÓN COMPLETA DE SUPABASE
+-- Proyecto: Asistente de Atención al Cliente
+-- ==========================================
+
 -- 1. Habilitar la extensión pgvector para nuestra Base de Datos Vectorial
 create extension if not exists vector;
 
--- 2. Crear tabla de Documentos RAG
+-- 2. Crear tabla de Documentos RAG (Base de conocimiento)
 create table if not exists documentos_rag (
   id uuid primary key default gen_random_uuid(),
   titulo text not null,
   contenido text not null,
   -- text-embedding-3-small de OpenAI usa 1536 dimensiones, pero si usamos Gemini (text-embedding-004) usa 768 dimensiones.
-  -- Usaremos 768 ya que usaremos la API gratuita de Google Gemini.
+  -- Usamos 768 ya que usamos la API gratuita de Google Gemini.
   embedding vector(768)
 );
 
@@ -24,9 +29,16 @@ create table if not exists turnos (
 );
 
 -- Evitar que se superpongan turnos (misma fecha y misma hora) para turnos agendados
-create unique index on turnos (fecha, hora) where estado = 'agendado';
+create unique index if not exists turnos_fecha_hora_agendado_idx on turnos (fecha, hora) where estado = 'agendado';
 
--- 4. Función RPC para realizar la búsqueda vectorial por similitud (Cosine Similarity)
+-- 4. Crear tabla para persistir las sesiones de chat (Memoria de conversación)
+create table if not exists sesiones_chat (
+  session_id text primary key,
+  messages jsonb not null default '[]'::jsonb,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 5. Función RPC para realizar la búsqueda vectorial por similitud (Cosine Similarity)
 -- Esta función será llamada desde el código de Next.js mediante el SDK de Supabase
 create or replace function match_documentos (
   query_embedding vector(768),
@@ -51,3 +63,11 @@ as $$
   order by similarity desc
   limit match_count;
 $$;
+
+-- 6. Deshabilitar Seguridad a Nivel de Fila (RLS)
+-- Como este es un proyecto de portafolio sin sistema de Login (Autenticación),
+-- vamos a deshabilitar las políticas de seguridad a nivel de fila (RLS)
+-- para que el backend pueda leer y escribir libremente usando la Anon Key.
+alter table documentos_rag disable row level security;
+alter table turnos disable row level security;
+alter table sesiones_chat disable row level security;
