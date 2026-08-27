@@ -15,7 +15,7 @@ import { embed } from 'ai';
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const { messages, sessionId }: { messages: UIMessage[], sessionId?: string } = await req.json();
 
   // Obtenemos la fecha y hora actual dinámicamente para inyectarla en el contexto del Agente
   const now = new Date();
@@ -153,6 +153,18 @@ export async function POST(req: Request) {
   });
 
   return createUIMessageStreamResponse({
-    stream: toUIMessageStream({ stream: result.stream }),
+    stream: toUIMessageStream({ 
+      stream: result.stream,
+      originalMessages: messages,
+      onEnd: async ({ messages: fullMessages }) => {
+        if (sessionId) {
+          await supabase.from('sesiones_chat').upsert({
+            session_id: sessionId,
+            messages: fullMessages,
+            updated_at: new Date().toISOString(),
+          });
+        }
+      }
+    }),
   });
 }

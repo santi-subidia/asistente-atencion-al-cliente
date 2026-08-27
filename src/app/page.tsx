@@ -2,13 +2,49 @@
 
 import { useChat } from '@ai-sdk/react';
 import { useRef, useEffect, useState } from 'react';
-import { DefaultChatTransport } from 'ai';
+import { DefaultChatTransport, type UIMessage } from 'ai';
+import { v4 as uuidv4 } from 'uuid';
 
-export default function Chat() {
+export default function ChatWrapper() {
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [initialMessages, setInitialMessages] = useState<UIMessage[]>([]);
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  useEffect(() => {
+    let storedSession = localStorage.getItem('chat_session_id');
+    if (!storedSession) {
+      storedSession = uuidv4();
+      localStorage.setItem('chat_session_id', storedSession);
+    }
+    setSessionId(storedSession);
+
+    fetch(`/api/chat/history?sessionId=${storedSession}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.messages) {
+          setInitialMessages(data.messages);
+        }
+      })
+      .catch((err) => console.error("Error fetching history:", err))
+      .finally(() => setIsInitializing(false));
+  }, []);
+
+  if (isInitializing) {
+    return <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-500">Cargando memoria del chat...</div>;
+  }
+
+  return <Chat sessionId={sessionId!} initialMessages={initialMessages} />;
+}
+
+function Chat({ sessionId, initialMessages }: { sessionId: string; initialMessages: UIMessage[] }) {
   const [input, setInput] = useState('');
+  
   const { messages, sendMessage, status } = useChat({
+    id: sessionId,
+    messages: initialMessages,
     transport: new DefaultChatTransport({
       api: '/api/chat',
+      body: () => ({ sessionId }),
     }),
   });
   
@@ -69,7 +105,7 @@ export default function Chat() {
                   
                   if (part.type.startsWith('tool-')) {
                     const toolName = part.type.replace('tool-', '');
-                    // @ts-ignore - Dependiendo de la versión del RC, part.state puede existir o no en los types, pero funciona en runtime
+                    // @ts-ignore
                     const isRunning = part.state === 'input-streaming' || part.state === 'input-available';
                     
                     return (
