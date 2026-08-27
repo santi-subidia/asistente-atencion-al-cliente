@@ -39,7 +39,7 @@ export default function ChatWrapper() {
 function Chat({ sessionId, initialMessages }: { sessionId: string; initialMessages: UIMessage[] }) {
   const [input, setInput] = useState('');
   
-  const { messages, sendMessage, status } = useChat({
+  const { messages, sendMessage, status, error } = useChat({
     id: sessionId,
     messages: initialMessages,
     transport: new DefaultChatTransport({
@@ -129,6 +129,25 @@ function Chat({ sessionId, initialMessages }: { sessionId: string; initialMessag
           ))}
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Banner de Error */}
+        {error && (
+          <div className="mx-4 mb-2 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-sm text-red-800 animate-fade-in">
+            <span className="text-base mt-0.5">⚠️</span>
+            <div className="flex-1">
+              <p className="font-semibold">
+                {error.message?.includes('GEMINI_QUOTA_EXCEEDED') 
+                  ? 'Límite de cuota superado' 
+                  : 'Error de comunicación'}
+              </p>
+              <p className="text-xs opacity-90 mt-0.5">
+                {error.message?.includes('GEMINI_QUOTA_EXCEEDED')
+                  ? 'Se agotó la cuota gratuita temporal de Gemini (Rate Limit / Quota Exceeded). Por favor, espera de 1 a 2 minutos para que se reactive.'
+                  : error.message?.replace('GEMINI_QUOTA_EXCEEDED: ', '').replace('ERROR: ', '') || 'Ocurrió un error inesperado.'}
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Input Area */}
         <form onSubmit={handleSubmit} className="p-4 border-t border-gray-200 bg-white rounded-b-xl flex gap-2">

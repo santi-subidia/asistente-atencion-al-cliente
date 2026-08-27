@@ -5,6 +5,7 @@ import {
   toUIMessageStream, 
   tool, 
   isStepCount,
+  APICallError,
   type UIMessage 
 } from 'ai';
 import { google } from '@ai-sdk/google';
@@ -48,28 +49,33 @@ export async function POST(req: Request) {
           query: z.string().describe('La duda o concepto a buscar, ej: "precio blanqueamiento" o "duele el implante"'),
         }),
         execute: async ({ query }: { query: string }) => {
-          const { embedding } = await embed({
-            model: google.embedding('gemini-embedding-001'),
-            value: query,
-            providerOptions: { google: { outputDimensionality: 768 } }
-          });
+          try {
+            const { embedding } = await embed({
+              model: google.embedding('gemini-embedding-001'),
+              value: query,
+              providerOptions: { google: { outputDimensionality: 768 } }
+            });
 
-          const { data, error } = await supabase.rpc('match_documentos', {
-            query_embedding: embedding,
-            match_threshold: 0.5, // Bajamos el umbral para que preguntas genéricas ("qué hay?") calcen con los documentos
-            match_count: 5, // Traemos más documentos a la vez
-          });
+            const { data, error } = await supabase.rpc('match_documentos', {
+              query_embedding: embedding,
+              match_threshold: 0.5, // Bajamos el umbral para que preguntas genéricas ("qué hay?") calcen con los documentos
+              match_count: 5, // Traemos más documentos a la vez
+            });
 
-          if (error) {
-            console.error('Error RAG:', error);
-            return 'Hubo un error al buscar la información. Intenta de nuevo.';
+            if (error) {
+              console.error('Error RAG:', error);
+              return 'Hubo un error al buscar la información. Intenta de nuevo.';
+            }
+
+            if (!data || data.length === 0) {
+              return 'No se encontró información sobre ese tema en la clínica.';
+            }
+
+            return data.map((d: any) => d.contenido).join('\n\n');
+          } catch (err: any) {
+            console.error('Error en herramienta buscar_informacion_clinica:', err);
+            throw err;
           }
-
-          if (!data || data.length === 0) {
-            return 'No se encontró información sobre ese tema en la clínica.';
-          }
-
-          return data.map((d: any) => d.contenido).join('\n\n');
         },
       }),
 
@@ -152,19 +158,57 @@ export async function POST(req: Request) {
     },
   });
 
-  return createUIMessageStreamResponse({
-    stream: toUIMessageStream({ 
-      stream: result.stream,
-      originalMessages: messages,
-      onEnd: async ({ messages: fullMessages }) => {
-        if (sessionId) {
-          await supabase.from('sesiones_chat').upsert({
-            session_id: sessionId,
-            messages: fullMessages,
-            updated_at: new Date().toISOString(),
-          });
+  try {
+    return createUIMessageStreamResponse({
+      stream: toUIMessageStream({ 
+        stream: result.stream,
+        originalMessages: messages,
+        onError: (error: any) => {
+          console.error('Error en stream de chat:', error);
+          
+          const errorMessage = error?.message || '';
+          const statusCode = error?.statusCode;
+          const isQuotaError = 
+            statusCode === 429 || 
+            errorMessage.includes('quota') || 
+            errorMessage.includes('limit') || 
+            errorMessage.includes('429') || 
+            errorMessage.includes('RESOURCE_EXHAUSTED') ||
+            (error instanceof APICallError && error.statusCode === 429);
+            
+          if (isQuotaError) {
+            return 'GEMINI_QUOTA_EXCEEDED: Se ha agotado la cuota de la API de Gemini (Rate Limit). El chat no responderá hasta que se restablezca.';
+          }
+          
+          return `ERROR: ${errorMessage || 'Error en el procesamiento del stream.'}`;
+        },
+        onEnd: async ({ messages: fullMessages }) => {
+          if (sessionId) {
+            await supabase.from('sesiones_chat').upsert({
+              session_id: sessionId,
+              messages: fullMessages,
+              updated_at: new Date().toISOString(),
+            });
+          }
         }
-      }
-    }),
-  });
+      }),
+    });
+  } catch (error: any) {
+    console.error('Error síncrono al iniciar stream:', error);
+    const errorMessage = error?.message || '';
+    const isQuotaError = 
+      error?.statusCode === 429 || 
+      errorMessage.includes('quota') || 
+      errorMessage.includes('limit') || 
+      errorMessage.includes('429') || 
+      errorMessage.includes('RESOURCE_EXHAUSTED') ||
+      (error instanceof APICallError && error.statusCode === 429);
+      
+    const status = isQuotaError ? 429 : 500;
+    const errorMsg = isQuotaError 
+      ? 'GEMINI_QUOTA_EXCEEDED: Se ha agotado la cuota de la API de Gemini (Rate Limit). El chat no responderá hasta que se restablezca.'
+      : `ERROR: ${errorMessage || 'Error interno del servidor.'}`;
+      
+    return new Response(errorMsg, { status });
+  }
 }
